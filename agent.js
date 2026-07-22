@@ -1,0 +1,27 @@
+import express from 'express';
+import { createTenantDatabase } from './provisioner.js';
+
+const app = express();
+app.use(express.json());
+
+// Bind to localhost only for now — swap to the WireGuard IP once that's set up
+const PORT = 4000;
+const HOST = '127.0.0.1';
+
+app.post('/tenants', async (req, res) => {
+  try {
+    const { tier } = req.body;
+    if (!tier) {
+      return res.status(400).json({ error: 'Missing "tier" in request body' });
+    }
+    const result = await createTenantDatabase(tier);
+    res.json(result);
+  } catch (err) {
+    console.error('Failed to create tenant:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.listen(PORT, HOST, () => {
+  console.log(`Agent listening on ${HOST}:${PORT}`);
+});
