@@ -1,0 +1,54 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: tenant-postgres
+    env_file:
+      - .env
+    mem_limit: 220m
+    volumes:
+      - ./data/postgres:/var/lib/postgresql
+      - ./postgres-init:/docker-entrypoint-initdb.d
+    command:
+      - "postgres"
+      - "-c"
+      - "password_encryption=scram-sha-256"
+      - "-c"
+      - "shared_buffers=55MB"
+      - "-c"
+      - "work_mem=2MB"
+      - "-c"
+      - "effective_cache_size=165MB"
+      - "-c"
+      - "max_connections=7"
+    restart: unless-stopped
+    networks:
+      - tenant-net
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: tenant-pgbouncer
+    depends_on:
+      - postgres
+    volumes:
+      - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
+    restart: unless-stopped
+    networks:
+      - tenant-net
+
+  postgrest:
+    image: postgrest/postgrest:latest
+    container_name: tenant-postgrest
+    depends_on:
+      - pgbouncer
+    env_file:
+      - .env
+    ports:
+      - "3001:3001"   # temporary, for local testing — remove once Caddy proxies this
+    restart: unless-stopped
+    networks:
+      - tenant-net
+
+networks:
+  tenant-net:
+    driver: bridge

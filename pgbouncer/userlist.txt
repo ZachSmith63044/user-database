@@ -1,0 +1,1 @@
+"testuser" "SCRAM-SHA-256$4096:ZkFapElV99RcsA0/m691aQ==$hPfBEn2AjklrAA5fFG8/H8t1U6foimrGhjlH4Qj+5CM=:OJLInwJ/oyLBSLaT6ZhQ/8aTSva2DWy05df2hwsL+7E="

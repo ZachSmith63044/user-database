@@ -1,0 +1,15 @@
+[databases]
+{{DB_NAME}} = host=postgres port=5432 dbname={{DB_NAME}}
+
+[pgbouncer]
+listen_addr = 0.0.0.0
+listen_port = 6432
+auth_type = scram-sha-256
+auth_file = /etc/pgbouncer/userlist.txt
+pool_mode = transaction
+max_client_conn = {{MAX_CLIENT_CONNECTIONS}}
+default_pool_size = {{POOL_SIZE}}
+
+client_tls_sslmode = disable
+client_tls_cert_file = /etc/pgbouncer/fullchain.pem
+client_tls_key_file = /etc/pgbouncer/privkey.pem

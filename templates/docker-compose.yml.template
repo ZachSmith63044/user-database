@@ -1,0 +1,65 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: tenant-{{TENANT_ID}}-postgres
+    environment:
+      POSTGRES_DB: {{DB_NAME}}
+      POSTGRES_USER: {{DB_USER}}
+      POSTGRES_PASSWORD: {{DB_PASSWORD}}
+    mem_limit: {{POSTGRES_RAM_MB}}m
+    volumes:
+      - {{DATA_DIR}}:/var/lib/postgresql
+      - ./postgres-init:/docker-entrypoint-initdb.d
+    command:
+      - "postgres"
+      - "-c"
+      - "password_encryption=scram-sha-256"
+      - "-c"
+      - "shared_buffers={{SHARED_BUFFERS_MB}}MB"
+      - "-c"
+      - "work_mem={{WORK_MEM_MB}}MB"
+      - "-c"
+      - "effective_cache_size={{EFFECTIVE_CACHE_SIZE_MB}}MB"
+      - "-c"
+      - "max_connections={{MAX_SQL_CONNECTIONS}}"
+    restart: unless-stopped
+    networks:
+      - tenant-net
+
+  pgbouncer:
+    mem_limit: {{PGBOUNCER_RAM_MB}}m
+    image: edoburu/pgbouncer:latest
+    container_name: tenant-{{TENANT_ID}}-pgbouncer
+    depends_on:
+      - postgres
+    ports:
+      - "127.0.0.1:{{PGBOUNCER_PORT}}:6432"
+    volumes:
+      - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
+      - /opt/tls-certs/fullchain.pem:/etc/pgbouncer/fullchain.pem:ro
+      - /opt/tls-certs/privkey.pem:/etc/pgbouncer/privkey.pem:ro
+    restart: unless-stopped
+    networks:
+      - tenant-net
+
+  postgrest:
+    mem_limit: {{POSTGREST_RAM_MB}}m
+    image: postgrest/postgrest:latest
+    container_name: tenant-{{TENANT_ID}}-postgrest
+    environment:
+      PGRST_DB_URI: postgres://{{DB_USER}}:{{DB_PASSWORD}}@postgres:5432/{{DB_NAME}}
+      PGRST_DB_SCHEMA: public
+      PGRST_DB_ANON_ROLE: {{DB_USER}}
+      PGRST_SERVER_PORT: 3001
+      PGRST_DB_CHANNEL_ENABLED: "true"
+      PGRST_DB_CHANNEL: pgrst
+    ports:
+      - "{{HOST_PORT}}:3001"
+    restart: unless-stopped
+    networks:
+      - tenant-net
+
+networks:
+  tenant-net:
+    driver: bridge
