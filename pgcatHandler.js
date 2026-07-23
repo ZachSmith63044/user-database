@@ -106,7 +106,7 @@ ${hostname} {
 function reloadCaddy() {
   try {
     execSync(`caddy validate --config ${CADDYFILE_PATH}`, { stdio: 'inherit' });
-    execSync('systemctl reload caddy', { stdio: 'inherit' });
+    execSync('sudo systemctl reload caddy', { stdio: 'inherit' });
     console.log('Caddy reloaded successfully.');
   } catch (err) {
     console.error('Failed to reload Caddy:', err.message);
