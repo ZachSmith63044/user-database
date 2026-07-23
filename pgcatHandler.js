@@ -10,6 +10,12 @@ const PGCAT_ADMIN_PORT = 6432;
 const PGCAT_ADMIN_USERNAME = 'admin';
 const PGCAT_ADMIN_PASSWORD_PATH = '/etc/pgcat/admin_password.txt';
 
+// Path to Caddy's config file on the VM
+const CADDYFILE_PATH = '/etc/caddy/Caddyfile';
+const TLS_CERT_PATH = '/opt/tls-certs/fullchain.pem';
+const TLS_KEY_PATH = '/opt/tls-certs/privkey.pem';
+const BASE_DOMAIN = 'simplexdb.com';
+
 /**
  * Appends a [pools.<dbname>] block for a newly created tenant to pgcat.toml,
  * then tells pgcat to RELOAD so it picks up the new pool without dropping
@@ -62,4 +68,48 @@ function reloadPgcat() {
   }
 }
 
-export { addTenantToPgcat, reloadPgcat };
+export { addTenantToPgcat, reloadPgcat, addTenantToCaddy };
+
+/**
+ * Appends a site block for a newly created tenant to Caddy's Caddyfile,
+ * proxying <tenant-hostname>.simplexdb.com to that tenant's PostgREST
+ * container, then reloads Caddy so it picks up the change with zero
+ * downtime for existing sites.
+ */
+function addTenantToCaddy(tenant) {
+  const hostname = `${tenant.dbName}.${BASE_DOMAIN}`;
+
+  const siteBlock = `
+${hostname} {
+    tls ${TLS_CERT_PATH} ${TLS_KEY_PATH}
+    reverse_proxy localhost:${tenant.hostPort}
+}
+`;
+
+  const existing = fs.existsSync(CADDYFILE_PATH)
+    ? fs.readFileSync(CADDYFILE_PATH, 'utf8')
+    : '';
+
+  if (existing.includes(hostname)) {
+    console.log(`Caddyfile already contains a block for ${hostname}, skipping append.`);
+  } else {
+    fs.appendFileSync(CADDYFILE_PATH, siteBlock);
+    console.log(`Appended Caddy site block for ${hostname}`);
+  }
+
+  reloadCaddy();
+}
+
+/**
+ * Validates and reloads Caddy's config without dropping existing connections.
+ */
+function reloadCaddy() {
+  try {
+    execSync(`caddy validate --config ${CADDYFILE_PATH}`, { stdio: 'inherit' });
+    execSync('systemctl reload caddy', { stdio: 'inherit' });
+    console.log('Caddy reloaded successfully.');
+  } catch (err) {
+    console.error('Failed to reload Caddy:', err.message);
+    throw err;
+  }
+}

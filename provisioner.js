@@ -3,7 +3,7 @@ import path from 'path';
 import { execSync } from 'child_process';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { addTenantToPgcat } from './pgcatHandler.js'
+import { addTenantToPgcat, addTenantToCaddy } from './pgcatHandler.js'
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -158,6 +158,7 @@ async function createTenantDatabase(tier) {
   execSync('docker compose up -d', { cwd: tenantDir, stdio: 'inherit' });
 
   addTenantToPgcat(tenant);
+  addTenantToCaddy(tenant);
 
   return { tenantId, tenantDir, hostPort: tenant.hostPort, pgbouncerPort: tenant.pgbouncer_port };
 }
