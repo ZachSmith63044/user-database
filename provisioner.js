@@ -120,7 +120,7 @@ function getNextFreePort(start, used) {
 }
 
 async function createTenantDatabase(tier) {
-  const tenantId = crypto.randomUUID();
+  const tenantId = Math.random().toString(36).slice(2, 14).padEnd(12, '0');;
 
   const used = getUsedPorts();
   const hostPort = getNextFreePort(3001, used);
@@ -128,7 +128,7 @@ async function createTenantDatabase(tier) {
 
   const tenant = {
     id: tenantId,
-    dbName: `db_${tenantId.replace(/-/g, '')}`,
+    dbName: `db_${tenantId}`,
     dbUser: 'testuser',
     dbPassword: 'password',
     shared_buffers_mb: tier.shared_buffers_mb,
