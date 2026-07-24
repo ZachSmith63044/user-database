@@ -77,7 +77,7 @@ export { addTenantToPgcat, reloadPgcat, addTenantToCaddy };
  * downtime for existing sites.
  */
 function addTenantToCaddy(tenant) {
-  const hostname = `${tenant.dbName}.${BASE_DOMAIN}`;
+  const hostname = `${tenant.id}.${BASE_DOMAIN}`;
 
   const siteBlock = `
 ${hostname} {
