@@ -171,31 +171,25 @@ function destroyTenantDatabase(tenantId) {
     throw new Error(`Tenant ${tenantId} not found`);
   }
 
-  // Reconstruct minimal tenant info needed to remove it from pgcat/Caddy
   const dbName = `db_${tenantId.replace(/-/g, '')}`;
   const tenant = { dbName };
 
-  // 1. Stop and remove containers + network
   console.log(`Stopping containers for tenant ${tenantId}...`);
   execSync('docker compose down', { cwd: tenantDir, stdio: 'inherit' });
 
-  // 2. Remove from pgcat and Caddy (reloads both)
   removeTenantFromPgcat(tenant);
   removeTenantFromCaddy(tenant);
 
-  // 3. Delete data directory (block volume)
+  // Delete data directory via a throwaway root container,
+  // since Postgres's data files are owned by the container's internal UID
   if (fs.existsSync(dataDir)) {
-    fs.rmSync(dataDir, { recursive: true, force: true });
+    execSync(`docker run --rm -v ${dataDir}:/target alpine rm -rf /target`, { stdio: 'inherit' });
     console.log(`Deleted data directory: ${dataDir}`);
   }
 
-  // 4. Delete tenant config directory (boot volume)
   fs.rmSync(tenantDir, { recursive: true, force: true });
   console.log(`Deleted tenant config directory: ${tenantDir}`);
 
-  // 5. Reminder: DNS record for this tenant's hostname still exists
-  //    and is not automatically removed. Clean up manually in Cloudflare,
-  //    or extend this function later to call Cloudflare's API directly.
   console.warn(`NOTE: DNS record for ${dbName}.${BASE_DOMAIN} was not removed automatically.`);
 
   return { tenantId, destroyed: true };
