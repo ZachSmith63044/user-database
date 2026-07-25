@@ -183,7 +183,7 @@ function destroyTenantDatabase(tenantId) {
   // Delete data directory via a throwaway root container,
   // since Postgres's data files are owned by the container's internal UID
   if (fs.existsSync(dataDir)) {
-    execSync(`docker run --rm -v ${dataDir}:/target alpine rm -rf /target`, { stdio: 'inherit' });
+    execSync(`docker run --rm -v ${DATA_DIR}:/target alpine rm -rf /target/${tenantId}`, { stdio: 'inherit' });
     console.log(`Deleted data directory: ${dataDir}`);
   }
 
