@@ -100,7 +100,7 @@ function removeTenantFromPgcat(tenant) {
  * Removes a tenant's site block from Caddy's Caddyfile, then reloads Caddy.
  */
 function removeTenantFromCaddy(tenant) {
-  const hostname = `${tenant.dbName}.${BASE_DOMAIN}`;
+  const hostname = `${tenant.id}.${BASE_DOMAIN}`;
   const existing = fs.existsSync(CADDYFILE_PATH)
     ? fs.readFileSync(CADDYFILE_PATH, 'utf8')
     : '';
@@ -135,7 +135,7 @@ export {
  * downtime for existing sites.
  */
 function addTenantToCaddy(tenant) {
-  const hostname = `${tenant.dbName}.${BASE_DOMAIN}`;
+  const hostname = `${tenant.id}.${BASE_DOMAIN}`;
 
   const siteBlock = `
 ${hostname} {
