@@ -125,6 +125,7 @@ export {
   addTenantToCaddy,
   removeTenantFromPgcat,
   removeTenantFromCaddy,
+  BASE_DOMAIN
 };
 
 /**
