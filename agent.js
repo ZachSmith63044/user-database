@@ -1,5 +1,5 @@
 import express from 'express';
-import { createTenantDatabase } from './provisioner.js';
+import { createTenantDatabase, destroyTenantDatabase } from './provisioner.js';
 
 const app = express();
 app.use(express.json());
@@ -7,6 +7,16 @@ app.use(express.json());
 // Bind to localhost only for now — swap to the WireGuard IP once that's set up
 const PORT = 4000;
 const HOST = '127.0.0.1';
+
+app.delete('/tenants/:tenantId', async (req, res) => {
+  try {
+    const result = destroyTenantDatabase(req.params.tenantId);
+    res.json(result);
+  } catch (err) {
+    console.error('Failed to destroy tenant:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 app.post('/tenants', async (req, res) => {
   try {

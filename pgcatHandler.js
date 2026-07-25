@@ -68,7 +68,64 @@ function reloadPgcat() {
   }
 }
 
-export { addTenantToPgcat, reloadPgcat, addTenantToCaddy };
+/**
+ * Removes a tenant's [pools.<dbname>] block from pgcat.toml (including its
+ * nested [pools.<dbname>.users.0] and [pools.<dbname>.shards.0] sub-blocks),
+ * then reloads pgcat.
+ */
+function removeTenantFromPgcat(tenant) {
+  const poolName = tenant.dbName;
+  const existing = fs.readFileSync(PGCAT_TOML_PATH, 'utf8');
+
+  // Matches from "[pools.<name>]" up to (but not including) the next
+  // top-level "[pools." or "[general]" section header, or end of file.
+  const blockRegex = new RegExp(
+    `\\n?\\[pools\\.${poolName}\\][\\s\\S]*?(?=\\n\\[pools\\.|\\n\\[general\\]|$)`,
+    'g'
+  );
+
+  if (!existing.includes(`[pools.${poolName}]`)) {
+    console.log(`pgcat.toml has no pool for ${poolName}, nothing to remove.`);
+    return;
+  }
+
+  const updated = existing.replace(blockRegex, '');
+  fs.writeFileSync(PGCAT_TOML_PATH, updated);
+  console.log(`Removed pool block for ${poolName} from pgcat.toml`);
+
+  reloadPgcat();
+}
+
+/**
+ * Removes a tenant's site block from Caddy's Caddyfile, then reloads Caddy.
+ */
+function removeTenantFromCaddy(tenant) {
+  const hostname = `${tenant.dbName}.${BASE_DOMAIN}`;
+  const existing = fs.existsSync(CADDYFILE_PATH)
+    ? fs.readFileSync(CADDYFILE_PATH, 'utf8')
+    : '';
+
+  if (!existing.includes(hostname)) {
+    console.log(`Caddyfile has no block for ${hostname}, nothing to remove.`);
+    return;
+  }
+
+  // Matches from "<hostname> {" through its closing "}"
+  const blockRegex = new RegExp(`\\n?${hostname} \\{[\\s\\S]*?\\n\\}\\n?`, 'g');
+  const updated = existing.replace(blockRegex, '');
+  fs.writeFileSync(CADDYFILE_PATH, updated);
+  console.log(`Removed Caddy site block for ${hostname}`);
+
+  reloadCaddy();
+}
+
+export {
+  addTenantToPgcat,
+  reloadPgcat,
+  addTenantToCaddy,
+  removeTenantFromPgcat,
+  removeTenantFromCaddy,
+};
 
 /**
  * Appends a site block for a newly created tenant to Caddy's Caddyfile,
@@ -77,7 +134,7 @@ export { addTenantToPgcat, reloadPgcat, addTenantToCaddy };
  * downtime for existing sites.
  */
 function addTenantToCaddy(tenant) {
-  const hostname = `${tenant.id}.${BASE_DOMAIN}`;
+  const hostname = `${tenant.dbName}.${BASE_DOMAIN}`;
 
   const siteBlock = `
 ${hostname} {
