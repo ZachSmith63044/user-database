@@ -6,7 +6,7 @@ app.use(express.json());
 
 // Bind to localhost only for now — swap to the WireGuard IP once that's set up
 const PORT = 4000;
-const HOST = '127.0.0.1';
+const HOST = '0.0.0.0';
 
 app.delete('/tenants/:tenantId', async (req, res) => {
   try {
