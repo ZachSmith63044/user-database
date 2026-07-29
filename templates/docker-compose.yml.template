@@ -7,6 +7,7 @@ services:
       POSTGRES_USER: {{DB_USER}}
       POSTGRES_PASSWORD: {{DB_PASSWORD}}
     mem_limit: {{POSTGRES_RAM_MB}}m
+    cpu_shares: {{POSTGRES_RAM_MB}}
     volumes:
       - {{DATA_DIR}}:/var/lib/postgresql
       - ./postgres-init:/docker-entrypoint-initdb.d
@@ -28,6 +29,7 @@ services:
 
   pgbouncer:
     mem_limit: {{PGBOUNCER_RAM_MB}}m
+    cpu_shares: {{PGBOUNCER_RAM_MB}}
     image: edoburu/pgbouncer:latest
     container_name: tenant-{{TENANT_ID}}-pgbouncer
     depends_on:
@@ -45,6 +47,7 @@ services:
 
   postgrest:
     mem_limit: {{POSTGREST_RAM_MB}}m
+    cpu_shares: {{POSTGREST_RAM_MB}}
     image: postgrest/postgrest:latest
     container_name: tenant-{{TENANT_ID}}-postgrest
     environment:
