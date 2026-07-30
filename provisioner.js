@@ -234,7 +234,7 @@ function destroyTenantDatabase(tenantId) {
   }
 
   const dbName = `db_${tenantId}`;
-  const tenant = { dbName };
+  const tenant = { dbName, tenantId, id: tenantId };
 
   console.log(`Stopping containers for tenant ${tenantId}...`);
   execSync('docker compose down', { cwd: tenantDir, stdio: 'inherit' });
@@ -243,6 +243,13 @@ function destroyTenantDatabase(tenantId) {
   removeTenantFromCaddy(tenant);
 
   destroyTenantDataVolume(dataDir);
+
+  // destroyTenantDataVolume only removes dataDir itself (.../postgres) -
+  // also remove the now-empty parent directory (.../<tenantId>).
+  const tenantDataParentDir = path.join(DATA_DIR, tenantId);
+  if (fs.existsSync(tenantDataParentDir)) {
+    fs.rmSync(tenantDataParentDir, { recursive: true, force: true });
+  }
 
   fs.rmSync(tenantDir, { recursive: true, force: true });
   console.log(`Deleted tenant config directory: ${tenantDir}`);
