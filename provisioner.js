@@ -3,7 +3,6 @@ import path from 'path';
 import { execSync } from 'child_process';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { addTenantToPgcat, addTenantToCaddy, removeTenantFromPgcat, removeTenantFromCaddy, BASE_DOMAIN } from './pgcatHandler.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,13 +18,67 @@ function renderTemplate(templatePath, vars) {
   return content;
 }
 
+/**
+ * Creates a fixed-size loopback filesystem and mounts it at dataDir.
+ * This gives the tenant a hard storage limit enforced by the kernel
+ * itself (ENOSPC once full) rather than a soft/periodic check.
+ *
+ * imagePath ends up at `${dataDir}.img`, sitting on the block volume
+ * alongside the tenants directory (not inside dataDir itself, since
+ * dataDir is about to become a separate mount point).
+ */
+function createTenantDataVolume(dataDir, storageMb) {
+  const imagePath = `${dataDir}.img`;
+
+  fs.mkdirSync(dataDir, { recursive: true });
+
+  // Create a fixed-size, sparse-then-filled file and format it as ext4.
+  execSync(`sudo fallocate -l ${storageMb}M "${imagePath}"`);
+  execSync(`sudo mkfs.ext4 -q "${imagePath}"`);
+
+  // Mount it at the tenant's actual data path via a loop device.
+  execSync(`sudo mount -o loop "${imagePath}" "${dataDir}"`);
+
+  // The postgres container runs as a specific internal UID - make sure
+  // the freshly mounted (root-owned by default) filesystem is writable.
+  execSync(`sudo chown -R 999:999 "${dataDir}"`);
+}
+
+/**
+ * Unmounts and deletes a tenant's loopback storage volume. Safe to call
+ * even if the mount was already torn down (e.g. containers already
+ * stopped) - unmount failures are swallowed since there may be nothing
+ * left to unmount.
+ */
+function destroyTenantDataVolume(dataDir) {
+  const imagePath = `${dataDir}.img`;
+
+  try {
+    execSync(`sudo umount "${dataDir}"`);
+  } catch (err) {
+    console.warn(`Could not unmount ${dataDir} (may already be unmounted): ${err.message}`);
+  }
+
+  if (fs.existsSync(imagePath)) {
+    execSync(`sudo rm -f "${imagePath}"`);
+  }
+
+  // Remove the now-empty mount point directory itself.
+  if (fs.existsSync(dataDir)) {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+}
+
 function writeTenantFiles(tenant) {
   const tenantDir = path.join(TENANTS_DIR, tenant.id);       // config: boot volume
-  const dataDir = path.join(DATA_DIR, tenant.id, 'postgres'); // data: block volume
+  const dataDir = path.join(DATA_DIR, tenant.id, 'postgres'); // data: block volume, loopback-mounted
 
   fs.mkdirSync(path.join(tenantDir, 'pgbouncer'), { recursive: true });
   fs.mkdirSync(path.join(tenantDir, 'postgres-init'), { recursive: true });
-  fs.mkdirSync(dataDir, { recursive: true });
+
+  // Create the tenant's fixed-size storage volume before anything tries
+  // to write into it.
+  createTenantDataVolume(dataDir, tenant.storage_mb);
 
   const vars = {
     TENANT_ID: tenant.id,
@@ -43,7 +96,7 @@ function writeTenantFiles(tenant) {
     POSTGRES_RAM_MB: tenant.postgres_ram_mb,
     PGBOUNCER_RAM_MB: tenant.pgbouncer_ram_mb,
     POSTGREST_RAM_MB: tenant.postgrest_ram_mb,
-    PGBOUNCER_PORT: tenant.pgbouncer_port
+    PGBOUNCER_PORT: tenant.pgbouncer_port,
   };
 
   fs.writeFileSync(
@@ -59,7 +112,7 @@ function writeTenantFiles(tenant) {
     path.join(tenantDir, 'postgres-init', '01-pgrst-schema-reload.sql')
   );
 
-  return tenantDir;
+  return { tenantDir, dataDir };
 }
 
 function waitForPostgresReady(containerName, retries = 30, delayMs = 1000, requiredConsecutive = 3) {
@@ -82,12 +135,9 @@ function waitForPostgresReady(containerName, retries = 30, delayMs = 1000, requi
 }
 
 function generateUserlist(tenant, tenantDir, retries = 5, delayMs = 1000) {
-  const containerName = `tenant-${tenant.id}-postgres`;
-
   for (let i = 0; i < retries; i++) {
     try {
       const passwd = tenant.dbPassword;
-
       const userlistContent = `"${tenant.dbUser}" "${passwd}"\n`;
       fs.writeFileSync(path.join(tenantDir, 'pgbouncer', 'userlist.txt'), userlistContent, { mode: 0o644 });
       return;
@@ -120,7 +170,7 @@ function getNextFreePort(start, used) {
 }
 
 async function createTenantDatabase(tier) {
-  const tenantId = Math.random().toString(36).slice(2, 14).padEnd(12, '0');;
+  const tenantId = crypto.randomUUID().replace(/-/g, '').slice(0, 10);
 
   const used = getUsedPorts();
   const hostPort = getNextFreePort(3001, used);
@@ -141,56 +191,50 @@ async function createTenantDatabase(tier) {
     postgres_ram_mb: tier.postgres_ram_mb,
     pgbouncer_ram_mb: tier.pgbouncer_ram_mb,
     postgrest_ram_mb: tier.postgrest_ram_mb,
-    pgbouncer_port: pgbouncerPort
+    pgbouncer_port: pgbouncerPort,
+    storage_mb: tier.storage_mb,
   };
 
-  const tenantDir = writeTenantFiles(tenant);
+  const { tenantDir, dataDir } = writeTenantFiles(tenant);
 
-  // Phase 1: start only postgres
-  execSync('docker compose up -d postgres', { cwd: tenantDir, stdio: 'inherit' });
+  try {
+    // Phase 1: start only postgres
+    execSync('docker compose up -d postgres', { cwd: tenantDir, stdio: 'inherit' });
 
-  waitForPostgresReady(`tenant-${tenant.id}-postgres`);
+    waitForPostgresReady(`tenant-${tenant.id}-postgres`);
 
-  // Phase 2: generate the pgbouncer userlist now that postgres is up
-  generateUserlist(tenant, tenantDir);
+    // Phase 2: generate the pgbouncer userlist now that postgres is up
+    generateUserlist(tenant, tenantDir);
 
-  // Phase 3: start the rest
-  execSync('docker compose up -d', { cwd: tenantDir, stdio: 'inherit' });
-
-  addTenantToPgcat(tenant);
-  addTenantToCaddy(tenant);
+    // Phase 3: start the rest
+    execSync('docker compose up -d', { cwd: tenantDir, stdio: 'inherit' });
+  } catch (err) {
+    // If anything fails mid-provisioning, clean up the loopback volume
+    // rather than leaving an orphaned mount + image file behind.
+    console.error('Provisioning failed, cleaning up storage volume:', err.message);
+    destroyTenantDataVolume(dataDir);
+    fs.rmSync(tenantDir, { recursive: true, force: true });
+    throw err;
+  }
 
   return { tenantId, tenantDir, hostPort: tenant.hostPort, pgbouncerPort: tenant.pgbouncer_port };
 }
 
 function destroyTenantDatabase(tenantId) {
   const tenantDir = path.join(TENANTS_DIR, tenantId);
-  const dataDir = path.join(DATA_DIR, tenantId);
+  const dataDir = path.join(DATA_DIR, tenantId, 'postgres');
 
   if (!fs.existsSync(tenantDir)) {
     throw new Error(`Tenant ${tenantId} not found`);
   }
 
-  const dbName = `db_${tenantId.replace(/-/g, '')}`;
-  const tenant = { dbName };
-
   console.log(`Stopping containers for tenant ${tenantId}...`);
   execSync('docker compose down', { cwd: tenantDir, stdio: 'inherit' });
 
-  removeTenantFromPgcat(tenant);
-  removeTenantFromCaddy(tenant);
-
-  // Delete data directory via a throwaway root container,
-  // since Postgres's data files are owned by the container's internal UID
-  if (fs.existsSync(dataDir)) {
-    execSync(`docker run --rm -v ${DATA_DIR}:/target alpine rm -rf /target/${tenantId}`, { stdio: 'inherit' });
-    console.log(`Deleted data directory: ${dataDir}`);
-  }
+  destroyTenantDataVolume(dataDir);
 
   fs.rmSync(tenantDir, { recursive: true, force: true });
   console.log(`Deleted tenant config directory: ${tenantDir}`);
-
-  console.warn(`NOTE: DNS record for ${dbName}.${BASE_DOMAIN} was not removed automatically.`);
 
   return { tenantId, destroyed: true };
 }
