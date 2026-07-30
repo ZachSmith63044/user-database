@@ -3,6 +3,7 @@ import path from 'path';
 import { execSync } from 'child_process';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
+import { addTenantToPgcat, addTenantToCaddy, removeTenantFromPgcat, removeTenantFromCaddy } from './pgcat-integration.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -217,6 +218,10 @@ async function createTenantDatabase(tier) {
     throw err;
   }
 
+  // Phase 4: register this tenant with pgcat and Caddy, reload both
+  addTenantToPgcat(tenant);
+  addTenantToCaddy(tenant);
+
   return { tenantId, tenantDir, hostPort: tenant.hostPort, pgbouncerPort: tenant.pgbouncer_port };
 }
 
@@ -228,8 +233,14 @@ function destroyTenantDatabase(tenantId) {
     throw new Error(`Tenant ${tenantId} not found`);
   }
 
+  const dbName = `db_${tenantId}`;
+  const tenant = { dbName };
+
   console.log(`Stopping containers for tenant ${tenantId}...`);
   execSync('docker compose down', { cwd: tenantDir, stdio: 'inherit' });
+
+  removeTenantFromPgcat(tenant);
+  removeTenantFromCaddy(tenant);
 
   destroyTenantDataVolume(dataDir);
 
