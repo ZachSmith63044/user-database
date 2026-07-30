@@ -3,7 +3,7 @@ import path from 'path';
 import { execSync } from 'child_process';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { addTenantToPgcat, addTenantToCaddy, removeTenantFromPgcat, removeTenantFromCaddy } from './pgcat-integration.js';
+import { addTenantToPgcat, addTenantToCaddy, removeTenantFromPgcat, removeTenantFromCaddy } from './pgcatHandler.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
