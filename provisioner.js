@@ -186,7 +186,7 @@ async function createTenantDatabase(tier) {
   const tenant = {
     id: tenantId,
     dbName: `db_${tenantId}`,
-    dbUser: 'testuser',
+    dbUser: tier.user_name,
     dbPassword: generateDbPassword(),
     shared_buffers_mb: tier.shared_buffers_mb,
     work_mem_mb: tier.work_mem_mb,
