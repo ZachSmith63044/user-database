@@ -170,6 +170,12 @@ function getNextFreePort(start, used) {
   return port;
 }
 
+function generateDbPassword() {
+  // Alphanumeric only - avoids URL-encoding issues in connection strings
+  // and problems with special characters in pgbouncer's userlist.txt.
+  return crypto.randomBytes(24).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 32);
+}
+
 async function createTenantDatabase(tier) {
   const tenantId = crypto.randomUUID().replace(/-/g, '').slice(0, 10);
 
@@ -181,7 +187,7 @@ async function createTenantDatabase(tier) {
     id: tenantId,
     dbName: `db_${tenantId}`,
     dbUser: 'testuser',
-    dbPassword: 'password',
+    dbPassword: generateDbPassword(),
     shared_buffers_mb: tier.shared_buffers_mb,
     work_mem_mb: tier.work_mem_mb,
     effective_cache_size_mb: tier.effective_cache_size_mb,
@@ -222,7 +228,14 @@ async function createTenantDatabase(tier) {
   addTenantToPgcat(tenant);
   addTenantToCaddy(tenant);
 
-  return { tenantId, tenantDir, hostPort: tenant.hostPort, pgbouncerPort: tenant.pgbouncer_port };
+  return {
+    tenantId,
+    tenantDir,
+    hostPort: tenant.hostPort,
+    pgbouncerPort: tenant.pgbouncer_port,
+    dbUser: tenant.dbUser,
+    dbPassword: tenant.dbPassword,
+  };
 }
 
 function destroyTenantDatabase(tenantId) {
