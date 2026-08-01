@@ -1,5 +1,5 @@
 import express from 'express';
-import { createTenantDatabase, destroyTenantDatabase } from './provisioner.js';
+import { createTenantDatabase, destroyTenantDatabase, expandToBlockStorage } from './provisioner.js';
 
 const app = express();
 app.use(express.json());
@@ -31,6 +31,21 @@ app.post('/tenants', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+app.post('/tenants/:tenantId/expandToBlockStorage', async (req, res) => {
+  try {
+    const { sizeGb } = req.body;
+    if (!sizeGb)
+    {
+      return res.status(400).json({ error: 'Missing "sizeGb" in request body' });
+    }
+    await expandToBlockStorage(req.params.tenantId, sizeGb);
+    res.json({ 'message': 'successful' })
+  } catch (err) {
+    console.error('Failed to create tenant:', err);
+    res.status(500).json({ error: err.message });
+  }
+})
 
 app.listen(PORT, HOST, () => {
   console.log(`Agent listening on ${HOST}:${PORT}`);

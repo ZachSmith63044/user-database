@@ -270,4 +270,28 @@ function destroyTenantDatabase(tenantId) {
   return { tenantId, destroyed: true };
 }
 
-export { createTenantDatabase, destroyTenantDatabase };
+function findNewVolumeDevice(sizeGb, toleranceGb = 0.25) {
+  const wantBytes = sizeGb * 1024 * 1024 * 1024;
+  const toleranceBytes = toleranceGb * 1024 * 1024 * 1024;
+
+  const cmd = `for d in $(lsblk -ndo NAME,TYPE | awk '$2=="disk"{print $1}'); do
+    dev="/dev/$d"
+    lsblk -no MOUNTPOINT "$dev" | grep -q . && continue
+    actual=$(lsblk -bno SIZE "$dev")
+    want=${wantBytes}
+    diff=$(( actual > want ? actual - want : want - actual ))
+    if [ "$diff" -lt ${toleranceBytes} ]; then
+      echo "$dev"
+      break
+    fi
+  done`;
+
+  const result = execSync(cmd, { shell: '/bin/bash', encoding: 'utf8' }).trim();
+  return result || null;
+}
+
+function expandToBlockStorage(tentantId, sizeGb) {
+  console.log(findNewVolumeDevice(sizeGb));
+}
+
+export { createTenantDatabase, destroyTenantDatabase, expandToBlockStorage };
