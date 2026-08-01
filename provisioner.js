@@ -299,33 +299,41 @@ function expandToBlockStorage(tenantId, sizeGb) {
 
   const tenantDir = path.join(TENANTS_DIR, tenantId);
   const dataDir = path.join(DATA_DIR, tenantId, 'postgres');
+  const tempMountDir = `${dataDir}-new`;
 
   if (!fs.existsSync(tenantDir)) {
     throw new Error(`Tenant ${tenantId} not found`);
   }
 
-  // 1. Stop postgres so nothing is writing to the data dir mid-swap
+  // 1. Stop postgres so the data directory is in a consistent, safe-to-copy state
   console.log(`Stopping postgres for tenant ${tenantId}...`);
   execSync('docker compose stop postgres', { cwd: tenantDir, stdio: 'inherit' });
 
-  // 2. Unmount the old loopback filesystem
-  // NOTE: this makes the old data at dataDir invisible (still physically
-  // present in dataDir.img, just no longer mounted there). No migration
-  // happens here yet - anything that existed is not copied over. Fine
-  // for an empty/new tenant; a real data migration step needs to be
-  // added here before this is safe to use on a tenant with real data.
+  // 2. Format the new device and mount it at a TEMPORARY path, so both
+  //    old and new are accessible simultaneously for the copy.
+  execSync(`sudo mkfs.ext4 -F "${device}"`);
+  execSync(`sudo mkdir -p "${tempMountDir}"`);
+  execSync(`sudo mount "${device}" "${tempMountDir}"`);
+
+  // 3. Copy everything from the old data directory into the new device,
+  //    preserving permissions/ownership/timestamps. Postgres is stopped,
+  //    so this is a safe cold copy of the whole data directory.
+  console.log(`Copying data from ${dataDir} to ${tempMountDir}...`);
+  execSync(`sudo rsync -a "${dataDir}/" "${tempMountDir}/"`);
+
+  // 4. Unmount both, then remount the new device at the REAL path
+  execSync(`sudo umount "${tempMountDir}"`);
   try {
     execSync(`sudo umount "${dataDir}"`);
   } catch (err) {
-    console.warn(`Could not unmount ${dataDir} (may already be unmounted): ${err.message}`);
+    console.warn(`Could not unmount old ${dataDir} (may already be unmounted): ${err.message}`);
   }
+  execSync(`sudo rmdir "${tempMountDir}"`);
 
-  // 3. Format and mount the new block device at the same path
-  execSync(`sudo mkfs.ext4 "${device}"`);
   execSync(`sudo mount "${device}" "${dataDir}"`);
   execSync(`sudo chown -R 999:999 "${dataDir}"`);
 
-  // 4. Make the mount persistent across reboots
+  // 5. Make the mount persistent across reboots
   const uuid = execSync(`sudo blkid -s UUID -o value "${device}"`, { encoding: 'utf8' }).trim();
   const fstabLine = `UUID=${uuid} ${dataDir} ext4 defaults,nofail,_netdev 0 2`;
   const fstabContent = fs.readFileSync('/etc/fstab', 'utf8');
@@ -333,13 +341,13 @@ function expandToBlockStorage(tenantId, sizeGb) {
     execSync(`echo "${fstabLine}" | sudo tee -a /etc/fstab`);
   }
 
-  // 5. Remove the now-orphaned loopback image file
+  // 6. Remove the now-orphaned loopback image file (data is safely copied over)
   const oldImagePath = `${dataDir}.img`;
   if (fs.existsSync(oldImagePath)) {
     execSync(`sudo rm -f "${oldImagePath}"`);
   }
 
-  // 6. Restart postgres
+  // 7. Restart postgres against the new, larger volume
   console.log(`Starting postgres for tenant ${tenantId}...`);
   execSync('docker compose start postgres', { cwd: tenantDir, stdio: 'inherit' });
 
