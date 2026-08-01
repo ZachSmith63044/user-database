@@ -290,8 +290,60 @@ function findNewVolumeDevice(sizeGb, toleranceGb = 0.25) {
   return result || null;
 }
 
-function expandToBlockStorage(tentantId, sizeGb) {
-  console.log(findNewVolumeDevice(sizeGb));
+function expandToBlockStorage(tenantId, sizeGb) {
+  const device = findNewVolumeDevice(sizeGb);
+  if (!device) {
+    throw new Error(`Could not identify a new block volume matching ${sizeGb}GB`);
+  }
+  console.log(`Found new volume at ${device}`);
+
+  const tenantDir = path.join(TENANTS_DIR, tenantId);
+  const dataDir = path.join(DATA_DIR, tenantId, 'postgres');
+
+  if (!fs.existsSync(tenantDir)) {
+    throw new Error(`Tenant ${tenantId} not found`);
+  }
+
+  // 1. Stop postgres so nothing is writing to the data dir mid-swap
+  console.log(`Stopping postgres for tenant ${tenantId}...`);
+  execSync('docker compose stop postgres', { cwd: tenantDir, stdio: 'inherit' });
+
+  // 2. Unmount the old loopback filesystem
+  // NOTE: this makes the old data at dataDir invisible (still physically
+  // present in dataDir.img, just no longer mounted there). No migration
+  // happens here yet - anything that existed is not copied over. Fine
+  // for an empty/new tenant; a real data migration step needs to be
+  // added here before this is safe to use on a tenant with real data.
+  try {
+    execSync(`sudo umount "${dataDir}"`);
+  } catch (err) {
+    console.warn(`Could not unmount ${dataDir} (may already be unmounted): ${err.message}`);
+  }
+
+  // 3. Format and mount the new block device at the same path
+  execSync(`sudo mkfs.ext4 "${device}"`);
+  execSync(`sudo mount "${device}" "${dataDir}"`);
+  execSync(`sudo chown -R 999:999 "${dataDir}"`);
+
+  // 4. Make the mount persistent across reboots
+  const uuid = execSync(`sudo blkid -s UUID -o value "${device}"`, { encoding: 'utf8' }).trim();
+  const fstabLine = `UUID=${uuid} ${dataDir} ext4 defaults,nofail,_netdev 0 2`;
+  const fstabContent = fs.readFileSync('/etc/fstab', 'utf8');
+  if (!fstabContent.includes(uuid)) {
+    execSync(`echo "${fstabLine}" | sudo tee -a /etc/fstab`);
+  }
+
+  // 5. Remove the now-orphaned loopback image file
+  const oldImagePath = `${dataDir}.img`;
+  if (fs.existsSync(oldImagePath)) {
+    execSync(`sudo rm -f "${oldImagePath}"`);
+  }
+
+  // 6. Restart postgres
+  console.log(`Starting postgres for tenant ${tenantId}...`);
+  execSync('docker compose start postgres', { cwd: tenantDir, stdio: 'inherit' });
+
+  return { tenantId, device, expanded: true };
 }
 
 export { createTenantDatabase, destroyTenantDatabase, expandToBlockStorage };
