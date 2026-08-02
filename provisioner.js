@@ -295,6 +295,11 @@ function getCurrentDataSizeBytes(dataDir) {
   return parseInt(output, 10);
 }
 
+function getFilesystemFreeBytes(mountPath) {
+  const output = execSync(`df --output=avail -B1 "${mountPath}" | tail -1`, { encoding: 'utf8' }).trim();
+  return parseInt(output, 10);
+}
+
 function expandToBlockStorage(tenantId, sizeGb) {
   const device = findNewVolumeDevice(sizeGb);
   if (!device) {
