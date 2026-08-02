@@ -290,6 +290,11 @@ function findNewVolumeDevice(sizeGb, toleranceGb = 0.25) {
   return result || null;
 }
 
+function getCurrentDataSizeBytes(dataDir) {
+  const output = execSync(`sudo du -sb "${dataDir}" | cut -f1`, { encoding: 'utf8' }).trim();
+  return parseInt(output, 10);
+}
+
 function expandToBlockStorage(tenantId, sizeGb) {
   const device = findNewVolumeDevice(sizeGb);
   if (!device) {
@@ -304,6 +309,28 @@ function expandToBlockStorage(tenantId, sizeGb) {
   if (!fs.existsSync(tenantDir)) {
     throw new Error(`Tenant ${tenantId} not found`);
   }
+
+  // 0. Confirm the current data actually fits on the new device BEFORE
+  //    touching anything - matters both for expansion (sanity check)
+  //    and especially for future downsizing (where this is the whole
+  //    point of the check, not just a safety net).
+  const currentDataBytes = getCurrentDataSizeBytes(dataDir);
+  const newDeviceBytes = parseInt(
+    execSync(`sudo blockdev --getsize64 "${device}"`, { encoding: 'utf8' }).trim(),
+    10
+  );
+  // Leave ~5% headroom for filesystem overhead (inodes, journal, reserved
+  // blocks) - an exact byte-for-byte fit would likely fail mid-copy.
+  const requiredBytes = currentDataBytes * 1.05;
+
+  if (requiredBytes > newDeviceBytes) {
+    throw new Error(
+      `Current data (${(currentDataBytes / 1024 / 1024 / 1024).toFixed(2)}GB, ` +
+      `+5% headroom = ${(requiredBytes / 1024 / 1024 / 1024).toFixed(2)}GB required) ` +
+      `does not fit on new device (${(newDeviceBytes / 1024 / 1024 / 1024).toFixed(2)}GB)`
+    );
+  }
+  console.log(`Size check passed: ${(currentDataBytes / 1024 / 1024 / 1024).toFixed(2)}GB of data fits on ${(newDeviceBytes / 1024 / 1024 / 1024).toFixed(2)}GB device`);
 
   // 1. Stop postgres so the data directory is in a consistent, safe-to-copy state
   console.log(`Stopping postgres for tenant ${tenantId}...`);
@@ -354,4 +381,78 @@ function expandToBlockStorage(tenantId, sizeGb) {
   return { tenantId, device, expanded: true };
 }
 
-export { createTenantDatabase, destroyTenantDatabase, expandToBlockStorage };
+function revertToLoopbackVolume(tenantId, sizeGb) {
+  const tenantDir = path.join(TENANTS_DIR, tenantId);
+  const dataDir = path.join(DATA_DIR, tenantId, 'postgres');
+  const tempMountDir = `${dataDir}-new`;
+  const newImagePath = `${dataDir}.img`;
+
+  if (!fs.existsSync(tenantDir)) {
+    throw new Error(`Tenant ${tenantId} not found`);
+  }
+
+  // 1. Stop postgres so the data directory is in a consistent, safe-to-copy state
+  console.log(`Stopping postgres for tenant ${tenantId}...`);
+  execSync('docker compose stop postgres', { cwd: tenantDir, stdio: 'inherit' });
+
+  // 2. Create the new loopback file and mount it at a TEMPORARY path,
+  //    so old (real block device) and new (loopback) are both
+  //    accessible simultaneously for the copy.
+  execSync(`sudo fallocate -l ${sizeGb}G "${newImagePath}"`);
+  execSync(`sudo mkfs.ext4 -q "${newImagePath}"`);
+  execSync(`sudo mkdir -p "${tempMountDir}"`);
+  execSync(`sudo mount -o loop "${newImagePath}" "${tempMountDir}"`);
+
+  // 3. Check fit using REAL filesystem-reported free space on the new
+  //    loopback filesystem, not an estimate - same pattern as expand.
+  const currentDataBytes = getCurrentDataSizeBytes(dataDir);
+  const availableBytes = getFilesystemFreeBytes(tempMountDir);
+  const requiredBytes = currentDataBytes * 1.02;
+
+  if (requiredBytes > availableBytes) {
+    execSync(`sudo umount "${tempMountDir}"`);
+    execSync(`sudo rmdir "${tempMountDir}"`);
+    execSync(`sudo rm -f "${newImagePath}"`);
+    execSync('docker compose start postgres', { cwd: tenantDir, stdio: 'inherit' });
+    throw new Error(
+      `Current data (${(currentDataBytes / 1024 / 1024 / 1024).toFixed(2)}GB) ` +
+      `does not fit on a ${sizeGb}GB loopback volume (${(availableBytes / 1024 / 1024 / 1024).toFixed(2)}GB available after formatting)`
+    );
+  }
+  console.log(`Size check passed: ${(currentDataBytes / 1024 / 1024 / 1024).toFixed(2)}GB fits in ${(availableBytes / 1024 / 1024 / 1024).toFixed(2)}GB available`);
+
+  // 4. Copy everything from the old (block device) data directory into
+  //    the new loopback filesystem.
+  console.log(`Copying data from ${dataDir} to ${tempMountDir}...`);
+  execSync(`sudo rsync -a "${dataDir}/" "${tempMountDir}/"`);
+
+  // 5. Identify the old block device (so it can be released/detached
+  //    afterward) before unmounting it.
+  const oldDevice = execSync(
+    `findmnt -n -o SOURCE "${dataDir}"`,
+    { encoding: 'utf8' }
+  ).trim();
+
+  // 6. Unmount both, then remount the loopback file at the REAL path
+  execSync(`sudo umount "${tempMountDir}"`);
+  try {
+    execSync(`sudo umount "${dataDir}"`);
+  } catch (err) {
+    console.warn(`Could not unmount old ${dataDir} (may already be unmounted): ${err.message}`);
+  }
+  execSync(`sudo rmdir "${tempMountDir}"`);
+
+  execSync(`sudo mount -o loop "${newImagePath}" "${dataDir}"`);
+  execSync(`sudo chown -R 999:999 "${dataDir}"`);
+
+  // 7. Remove the fstab entry that pointed at the old block device
+  execSync(`sudo sed -i "\\|${dataDir}|d" /etc/fstab`);
+
+  // 8. Restart postgres against the reverted loopback volume
+  console.log(`Starting postgres for tenant ${tenantId}...`);
+  execSync('docker compose start postgres', { cwd: tenantDir, stdio: 'inherit' });
+
+  return { tenantId, oldDevice, reverted: true };
+}
+
+export { createTenantDatabase, destroyTenantDatabase, expandToBlockStorage, revertToLoopbackVolume };
