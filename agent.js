@@ -1,5 +1,5 @@
 import express from 'express';
-import { createTenantDatabase, destroyTenantDatabase, expandToBlockStorage, revertToLoopbackVolume } from './provisioner.js';
+import { createTenantDatabase, destroyTenantDatabase, expandToBlockStorage, revertToLoopbackVolume, expandExistingBlockVolume } from './provisioner.js';
 
 const app = express();
 app.use(express.json());
@@ -32,9 +32,20 @@ app.post('/tenants', async (req, res) => {
   }
 });
 
+app.put('/tenants/:tenantId/expandExistingBlockStorage', async (req, res) => {
+  try {
+    await expandExistingBlockVolume(req.params.tenantId);
+    res.json({ 'message': 'successful' });
+  }
+  catch (err) {
+    console.log("Failed to expande tenant: ", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/tenants/:tenantId/expandToBlockStorage', async (req, res) => {
   try {
-    const { sizeGb } = req.body;
+    const { sizeGb } = req.body || {};
     if (!sizeGb)
     {
       return res.status(400).json({ error: 'Missing "sizeGb" in request body' });

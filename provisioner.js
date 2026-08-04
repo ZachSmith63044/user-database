@@ -300,6 +300,26 @@ function getFilesystemFreeBytes(mountPath) {
   return parseInt(output, 10);
 }
 
+function expandExistingBlockVolume(tenantId) {
+  const dataDir = path.join(DATA_DIR, tenantId, 'postgres');
+
+  // Find the actual device currently mounted at this tenant's data path
+  const device = execSync(`findmnt -n -o SOURCE "${dataDir}"`, { encoding: 'utf8' }).trim();
+  if (!device) {
+    throw new Error(`Could not find a mounted device for tenant ${tenantId}`);
+  }
+
+  const deviceName = device.replace('/dev/', '');
+
+  // Rescan the device so the kernel picks up the new size
+  execSync(`echo 1 | sudo tee /sys/class/block/${deviceName}/device/rescan`);
+
+  // Grow the filesystem in place - online, no unmount, no stopping postgres
+  execSync(`sudo resize2fs "${device}"`);
+
+  return { tenantId, device, expanded: true };
+}
+
 function expandToBlockStorage(tenantId, sizeGb) {
   const device = findNewVolumeDevice(sizeGb);
   if (!device) {
@@ -460,4 +480,4 @@ function revertToLoopbackVolume(tenantId, sizeGb) {
   return { tenantId, oldDevice, reverted: true };
 }
 
-export { createTenantDatabase, destroyTenantDatabase, expandToBlockStorage, revertToLoopbackVolume };
+export { createTenantDatabase, destroyTenantDatabase, expandToBlockStorage, revertToLoopbackVolume, expandExistingBlockVolume };
