@@ -495,7 +495,7 @@ function backupTenantDatabase(tenantId) {
 
   const container = `tenant-${tenantId}-postgres`;
   const dbName = `db_${tenantId}`;
-  const dbUser = 'testuser';
+  const dbUser = 'baseuser';
 
   // Confirm the container is actually running before attempting a dump
   const runningContainers = execSync('docker ps --format "{{.Names}}"', { encoding: 'utf8' });
