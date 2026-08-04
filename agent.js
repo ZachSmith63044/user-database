@@ -1,5 +1,5 @@
 import express from 'express';
-import { createTenantDatabase, destroyTenantDatabase, expandToBlockStorage, revertToLoopbackVolume, expandExistingBlockVolume } from './provisioner.js';
+import { createTenantDatabase, destroyTenantDatabase, expandToBlockStorage, revertToLoopbackVolume, expandExistingBlockVolume, backupTenantDatabase } from './provisioner.js';
 
 const app = express();
 app.use(express.json());
@@ -69,6 +69,16 @@ app.post('/tenants/:tenantId/removeBlockStorage', async (req, res) => {
     res.json({ 'message': 'successful' })
   } catch (err) {
     console.error('Failed to create tenant:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/tenants/:tenantId/backup', async (req, res) => {
+  try {
+    const result = backupTenantDatabase(req.params.tenantId);
+    res.json(result);
+  } catch (err) {
+    console.error('Failed to back up tenant:', err);
     res.status(500).json({ error: err.message });
   }
 });

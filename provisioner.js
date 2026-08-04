@@ -480,4 +480,55 @@ function revertToLoopbackVolume(tenantId, sizeGb) {
   return { tenantId, oldDevice, reverted: true };
 }
 
-export { createTenantDatabase, destroyTenantDatabase, expandToBlockStorage, revertToLoopbackVolume, expandExistingBlockVolume };
+const BACKUP_BUCKET = 'simplexdb-backups';
+
+/**
+ * Backs up a single tenant's database (pg_dump, gzipped) and uploads it
+ * to Object Storage at <tenantId>/<YYYY-MM-DD>.sql.gz. Returns the
+ * object name and size on success.
+ */
+function backupTenantDatabase(tenantId) {
+  const tenantDir = path.join(TENANTS_DIR, tenantId);
+  if (!fs.existsSync(tenantDir)) {
+    throw new Error(`Tenant ${tenantId} not found`);
+  }
+
+  const container = `tenant-${tenantId}-postgres`;
+  const dbName = `db_${tenantId}`;
+  const dbUser = 'testuser';
+
+  // Confirm the container is actually running before attempting a dump
+  const runningContainers = execSync('docker ps --format "{{.Names}}"', { encoding: 'utf8' });
+  if (!runningContainers.split('\n').includes(container)) {
+    throw new Error(`Container ${container} is not running`);
+  }
+
+  const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const objectName = `${tenantId}/${date}.sql.gz`;
+  const localBackupPath = `/tmp/${tenantId}-${date}.sql.gz`;
+
+  console.log(`Backing up ${tenantId}...`);
+  execSync(
+    `docker exec ${container} pg_dump -U ${dbUser} ${dbName} | gzip > "${localBackupPath}"`,
+    { shell: '/bin/bash', stdio: 'inherit' }
+  );
+
+  const sizeBytes = fs.statSync(localBackupPath).size;
+  if (sizeBytes === 0) {
+    fs.unlinkSync(localBackupPath);
+    throw new Error(`Backup for ${tenantId} produced an empty file - aborting upload`);
+  }
+
+  console.log(`Uploading ${objectName} (${(sizeBytes / 1024 / 1024).toFixed(2)}MB)...`);
+  execSync(
+    `oci os object put --bucket-name ${BACKUP_BUCKET} --file "${localBackupPath}" --name "${objectName}" --auth instance_principal --force`,
+    { stdio: 'inherit' }
+  );
+
+  fs.unlinkSync(localBackupPath);
+  console.log(`Backup complete: ${objectName}`);
+
+  return { tenantId, objectName, sizeBytes, date };
+}
+
+export { createTenantDatabase, destroyTenantDatabase, expandToBlockStorage, revertToLoopbackVolume, expandExistingBlockVolume, backupTenantDatabase };
