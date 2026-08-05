@@ -86,40 +86,40 @@ app.post('/tenants/:tenantId/backup', async (req, res) => {
 
 app.get('/tenants/:tenantId/mount-status', (req, res) => {
   const dataDir = path.join(DATA_DIR, req.params.tenantId, 'postgres');
+  console.log(`[mount-status] Checking dataDir: ${dataDir}`);
+
   try {
     const source = execSync(`findmnt -n -o SOURCE "${dataDir}"`, { encoding: 'utf8' }).trim();
+    console.log(`[mount-status] findmnt returned source: "${source}"`);
 
-    // Loopback mounts can show up either as /dev/loopN or as the
-    // backing .img file path itself, depending on how it was mounted -
-    // handle both.
     const isLoopBacked = source.startsWith('/dev/loop') || source.endsWith('.img');
+    console.log(`[mount-status] isLoopBacked: ${isLoopBacked}`);
 
     let sizeBytes;
     if (source.startsWith('/dev/')) {
-      // A real block device - either a loop device or a raw disk (sdc, sdd, ...)
-      sizeBytes = parseInt(
-        execSync(`lsblk -bno SIZE "${source}"`, { encoding: 'utf8' }).trim().split('\n')[0],
-        10
-      );
+      const lsblkOutput = execSync(`lsblk -bno SIZE "${source}"`, { encoding: 'utf8' }).trim();
+      console.log(`[mount-status] lsblk output: "${lsblkOutput}"`);
+      sizeBytes = parseInt(lsblkOutput.split('\n')[0], 10);
     } else {
-      // A backing file path (e.g. .../postgres.img) - read its size directly
-      sizeBytes = parseInt(execSync(`stat -c%s "${source}"`, { encoding: 'utf8' }).trim(), 10);
+      const statOutput = execSync(`stat -c%s "${source}"`, { encoding: 'utf8' }).trim();
+      console.log(`[mount-status] stat output: "${statOutput}"`);
+      sizeBytes = parseInt(statOutput, 10);
     }
+    console.log(`[mount-status] sizeBytes: ${sizeBytes}`);
+
     const sizeGb = Math.round((sizeBytes / (1024 ** 3)) * 100) / 100;
 
-    // "Communal" = this tenant's data is a loopback file sitting on the
-    // shared /mnt/tenant-data volume (always sda/sdb), rather than a
-    // dedicated real block device attached specifically for this
-    // tenant (sdc, sdd, ... - anything beyond boot + shared volume).
     let isCommunal = isLoopBacked;
     if (!isLoopBacked && source.startsWith('/dev/')) {
       const baseDeviceMatch = source.match(/^\/dev\/(sd[a-z])/);
       const baseDevice = baseDeviceMatch ? baseDeviceMatch[1] : null;
       isCommunal = baseDevice === 'sda' || baseDevice === 'sdb';
+      console.log(`[mount-status] baseDevice: ${baseDevice}, isCommunal: ${isCommunal}`);
     }
 
     res.json({ mounted: true, device: source, sizeGb, isCommunal });
   } catch (err) {
+    console.error(`[mount-status] Error checking mount status:`, err.message);
     res.json({ mounted: false, device: null, sizeGb: null, isCommunal: null });
   }
 });
