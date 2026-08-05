@@ -86,27 +86,21 @@ app.post('/tenants/:tenantId/backup', async (req, res) => {
 });
 
 app.get('/tenants/:tenantId/mount-status', (req, res) => {
+  const sizeRequested = req.body.sizeGb;
   const dataDir = path.join(DATA_DIR, req.params.tenantId, 'postgres');
-  console.log(`[mount-status] Checking dataDir: ${dataDir}`);
 
   try {
     const source = execSync(`findmnt -n -o SOURCE "${dataDir}"`, { encoding: 'utf8' }).trim();
-    console.log(`[mount-status] findmnt returned source: "${source}"`);
-
     const isLoopBacked = source.startsWith('/dev/loop') || source.endsWith('.img');
-    console.log(`[mount-status] isLoopBacked: ${isLoopBacked}`);
 
     let sizeBytes;
     if (source.startsWith('/dev/')) {
       const lsblkOutput = execSync(`lsblk -bno SIZE "${source}"`, { encoding: 'utf8' }).trim();
-      console.log(`[mount-status] lsblk output: "${lsblkOutput}"`);
       sizeBytes = parseInt(lsblkOutput.split('\n')[0], 10);
     } else {
       const statOutput = execSync(`stat -c%s "${source}"`, { encoding: 'utf8' }).trim();
-      console.log(`[mount-status] stat output: "${statOutput}"`);
       sizeBytes = parseInt(statOutput, 10);
     }
-    console.log(`[mount-status] sizeBytes: ${sizeBytes}`);
 
     const sizeGb = Math.round((sizeBytes / (1024 ** 3)) * 100) / 100;
 
@@ -115,13 +109,18 @@ app.get('/tenants/:tenantId/mount-status', (req, res) => {
       const baseDeviceMatch = source.match(/^\/dev\/(sd[a-z])/);
       const baseDevice = baseDeviceMatch ? baseDeviceMatch[1] : null;
       isCommunal = baseDevice === 'sda' || baseDevice === 'sdb';
-      console.log(`[mount-status] baseDevice: ${baseDevice}, isCommunal: ${isCommunal}`);
     }
 
-    res.json({ mounted: true, device: source, sizeGb, isCommunal });
+    let matches = false;
+    if (!isCommunal && sizeRequested == sizeGb) {
+      matches = true;
+    }
+    
+
+    res.json({ mounted: true, device: source, sizeGb, isCommunal, matches });
   } catch (err) {
     console.error(`[mount-status] Error checking mount status:`, err.message);
-    res.json({ mounted: false, device: null, sizeGb: null, isCommunal: null });
+    res.json({ mounted: false, device: null, sizeGb: null, isCommunal: null, matches: null });
   }
 });
 
