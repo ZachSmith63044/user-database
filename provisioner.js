@@ -487,7 +487,7 @@ const BACKUP_BUCKET = 'simplexdb-backups';
  * to Object Storage at <tenantId>/<YYYY-MM-DD>.sql.gz. Returns the
  * object name and size on success.
  */
-function backupTenantDatabase(tenantId) {
+function backupTenantDatabase(tenantId, backupName) {
   const tenantDir = path.join(TENANTS_DIR, tenantId);
   if (!fs.existsSync(tenantDir)) {
     throw new Error(`Tenant ${tenantId} not found`);
@@ -503,9 +503,8 @@ function backupTenantDatabase(tenantId) {
     throw new Error(`Container ${container} is not running`);
   }
 
-  const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-  const objectName = `${tenantId}/${date}.sql.gz`;
-  const localBackupPath = `/tmp/${tenantId}-${date}.sql.gz`;
+  const objectName = `${tenantId}/${backupName}.sql.gz`;
+  const localBackupPath = `/tmp/${tenantId}-${backupName}.sql.gz`;
 
   console.log(`Backing up ${tenantId}...`);
   execSync(
@@ -528,7 +527,7 @@ function backupTenantDatabase(tenantId) {
   fs.unlinkSync(localBackupPath);
   console.log(`Backup complete: ${objectName}`);
 
-  return { tenantId, objectName, sizeBytes, date };
+  return { tenantId, objectName, sizeBytes, backupName };
 }
 
 export { createTenantDatabase, destroyTenantDatabase, expandToBlockStorage, revertToLoopbackVolume, expandExistingBlockVolume, backupTenantDatabase };
