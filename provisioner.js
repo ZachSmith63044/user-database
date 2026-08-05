@@ -530,4 +530,4 @@ function backupTenantDatabase(tenantId, backupName) {
   return { tenantId, objectName, sizeBytes, backupName };
 }
 
-export { createTenantDatabase, destroyTenantDatabase, expandToBlockStorage, revertToLoopbackVolume, expandExistingBlockVolume, backupTenantDatabase };
+export { createTenantDatabase, destroyTenantDatabase, expandToBlockStorage, revertToLoopbackVolume, expandExistingBlockVolume, backupTenantDatabase, DATA_DIR };

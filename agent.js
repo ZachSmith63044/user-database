@@ -1,5 +1,5 @@
 import express from 'express';
-import { createTenantDatabase, destroyTenantDatabase, expandToBlockStorage, revertToLoopbackVolume, expandExistingBlockVolume, backupTenantDatabase } from './provisioner.js';
+import { createTenantDatabase, destroyTenantDatabase, expandToBlockStorage, revertToLoopbackVolume, expandExistingBlockVolume, backupTenantDatabase, DATA_DIR } from './provisioner.js';
 
 const app = express();
 app.use(express.json());
