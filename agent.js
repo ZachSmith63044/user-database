@@ -76,12 +76,36 @@ app.post('/tenants/:tenantId/removeBlockStorage', async (req, res) => {
 });
 
 app.post('/tenants/:tenantId/backup', async (req, res) => {
+  const { tenantId } = req.params;
+  const { backupName } = req.body;
+  res.json({ started: true, tenantId, backupName });
+
   try {
-    const result = backupTenantDatabase(req.params.tenantId, req.body.backupName);
-    res.json(result);
+    const result = backupTenantDatabase(tenantId, backupName);
+
+    await fetch(`http://10.100.0.1:5000/confirm-backup/${backupName}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sizeBytes: result.sizeBytes,
+        status: 'active',
+      }),
+    });
   } catch (err) {
-    console.error('Failed to back up tenant:', err);
-    res.status(500).json({ error: err.message });
+    console.error(`Backup failed for tenant ${tenantId}:`, err);
+    
+    try {
+      await fetch(`http://10.100.0.1:5000/confirm-backup/${backupName}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'failed',
+          errorMessage: err.message,
+        }),
+      });
+    } catch (notifyErr) {
+      console.error(`Also failed to notify master of backup failure:`, notifyErr);
+    }
   }
 });
 
