@@ -86,7 +86,10 @@ app.post('/tenants/:tenantId/backup', async (req, res) => {
 });
 
 app.get('/tenants/:tenantId/mount-status', (req, res) => {
-  const sizeRequested = req.body.sizeGb;
+  const sizeRequested = parseFloat(req.query.sizeGb);
+  if (isNaN(sizeRequested)) {
+    return res.status(400).json({ error: 'Missing or invalid sizeGb query parameter' });
+  }
   const dataDir = path.join(DATA_DIR, req.params.tenantId, 'postgres');
 
   try {
