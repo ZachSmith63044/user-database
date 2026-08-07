@@ -543,7 +543,7 @@ function restoreTenantFromBackup(objectName) {
 
   const container = `tenant-${tenantId}-postgres`;
   const dbName = `db_${tenantId}`;
-  const dbUser = 'testuser';
+  const dbUser = 'baseuser';
 
   const runningContainers = execSync('docker ps --format "{{.Names}}"', { encoding: 'utf8' });
   if (!runningContainers.split('\n').includes(container)) {
