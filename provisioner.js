@@ -530,4 +530,65 @@ function backupTenantDatabase(tenantId, backupName) {
   return { tenantId, objectName, sizeBytes, backupName };
 }
 
-export { createTenantDatabase, destroyTenantDatabase, expandToBlockStorage, revertToLoopbackVolume, expandExistingBlockVolume, backupTenantDatabase, DATA_DIR };
+function restoreTenantFromBackup(objectName) {
+  const [tenantId] = objectName.split('/');
+  if (!tenantId) {
+    throw new Error(`Could not determine tenantId from objectName: ${objectName}`);
+  }
+
+  const tenantDir = path.join(TENANTS_DIR, tenantId);
+  if (!fs.existsSync(tenantDir)) {
+    throw new Error(`Tenant ${tenantId} not found`);
+  }
+
+  const container = `tenant-${tenantId}-postgres`;
+  const dbName = `db_${tenantId}`;
+  const dbUser = 'testuser';
+
+  const runningContainers = execSync('docker ps --format "{{.Names}}"', { encoding: 'utf8' });
+  if (!runningContainers.split('\n').includes(container)) {
+    throw new Error(`Container ${container} is not running`);
+  }
+
+  const localBackupPath = `/tmp/restore-${tenantId}-${Date.now()}.sql.gz`;
+
+  // 1. Download the backup from Object Storage
+  console.log(`Downloading ${objectName}...`);
+  execSync(
+    `oci os object get --bucket-name ${BACKUP_BUCKET} --name "${objectName}" --file "${localBackupPath}" --auth instance_principal`,
+    { stdio: 'inherit' }
+  );
+
+  if (!fs.existsSync(localBackupPath) || fs.statSync(localBackupPath).size === 0) {
+    throw new Error(`Downloaded backup file is missing or empty: ${objectName}`);
+  }
+
+  try {
+    // 2. Drop and recreate the database cleanly, so the restore starts
+    //    from an empty schema rather than merging on top of whatever
+    //    currently exists.
+    console.log(`Dropping and recreating ${dbName}...`);
+    execSync(
+      `docker exec ${container} psql -U ${dbUser} -d postgres -c "DROP DATABASE IF EXISTS ${dbName};"`,
+      { stdio: 'inherit' }
+    );
+    execSync(
+      `docker exec ${container} psql -U ${dbUser} -d postgres -c "CREATE DATABASE ${dbName} OWNER ${dbUser};"`,
+      { stdio: 'inherit' }
+    );
+
+    // 3. Pipe the decompressed backup into the fresh database
+    console.log(`Restoring ${objectName} into ${dbName}...`);
+    execSync(
+      `gunzip -c "${localBackupPath}" | docker exec -i ${container} psql -U ${dbUser} -d ${dbName}`,
+      { shell: '/bin/bash', stdio: 'inherit' }
+    );
+  } finally {
+    fs.unlinkSync(localBackupPath);
+  }
+
+  console.log(`Restore complete: ${objectName} -> ${tenantId}`);
+  return { tenantId, objectName, restored: true };
+}
+
+export { createTenantDatabase, destroyTenantDatabase, expandToBlockStorage, revertToLoopbackVolume, expandExistingBlockVolume, backupTenantDatabase, restoreTenantFromBackup, DATA_DIR };

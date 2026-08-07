@@ -1,5 +1,5 @@
 import express from 'express';
-import { createTenantDatabase, destroyTenantDatabase, expandToBlockStorage, revertToLoopbackVolume, expandExistingBlockVolume, backupTenantDatabase, DATA_DIR } from './provisioner.js';
+import { createTenantDatabase, destroyTenantDatabase, expandToBlockStorage, revertToLoopbackVolume, expandExistingBlockVolume, backupTenantDatabase, restoreTenantFromBackup, DATA_DIR } from './provisioner.js';
 import path from 'path';
 import { execSync } from 'child_process';
 
@@ -148,6 +148,21 @@ app.get('/tenants/:tenantId/mount-status', (req, res) => {
   } catch (err) {
     console.error(`[mount-status] Error checking mount status:`, err.message);
     res.json({ mounted: false, device: null, sizeGb: null, isCommunal: null, matches: null });
+  }
+});
+
+app.post('/tenants/restore', async (req, res) => {
+  const { objectName } = req.body;
+  if (!objectName) {
+    return res.status(400).json({ error: 'Missing "objectName" in request body' });
+  }
+
+  try {
+    const result = restoreTenantFromBackup(objectName);
+    res.json(result);
+  } catch (err) {
+    console.error('Failed to restore tenant:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
