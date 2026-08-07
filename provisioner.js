@@ -530,7 +530,7 @@ function backupTenantDatabase(tenantId, backupName) {
   return { tenantId, objectName, sizeBytes, backupName };
 }
 
-function restoreTenantFromBackup(objectName) {
+function restoreTenantFromBackup(objectName, dbUser = 'baseuser') {
   const [tenantId] = objectName.split('/');
   if (!tenantId) {
     throw new Error(`Could not determine tenantId from objectName: ${objectName}`);
@@ -543,7 +543,6 @@ function restoreTenantFromBackup(objectName) {
 
   const container = `tenant-${tenantId}-postgres`;
   const dbName = `db_${tenantId}`;
-  const dbUser = 'baseuser';
 
   const runningContainers = execSync('docker ps --format "{{.Names}}"', { encoding: 'utf8' });
   if (!runningContainers.split('\n').includes(container)) {
@@ -552,7 +551,6 @@ function restoreTenantFromBackup(objectName) {
 
   const localBackupPath = `/tmp/restore-${tenantId}-${Date.now()}.sql.gz`;
 
-  // 1. Download the backup from Object Storage
   console.log(`Downloading ${objectName}...`);
   execSync(
     `oci os object get --bucket-name ${BACKUP_BUCKET} --name "${objectName}" --file "${localBackupPath}" --auth instance_principal`,
@@ -564,9 +562,21 @@ function restoreTenantFromBackup(objectName) {
   }
 
   try {
-    // 2. Drop and recreate the database cleanly, so the restore starts
-    //    from an empty schema rather than merging on top of whatever
-    //    currently exists.
+    // Stop pgbouncer and postgrest FIRST - they hold persistent pooled
+    // connections that would otherwise keep re-establishing sessions
+    // against the database even after we terminate existing ones.
+    console.log(`Stopping pgbouncer/postgrest for ${tenantId}...`);
+    execSync('docker compose stop pgbouncer postgrest', { cwd: tenantDir, stdio: 'inherit' });
+
+    // Terminate any remaining active sessions on the target database
+    // (e.g. leftover backend connections) before attempting to drop it.
+    console.log(`Terminating existing connections to ${dbName}...`);
+    execSync(
+      `docker exec ${container} psql -U ${dbUser} -d postgres -c ` +
+      `"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${dbName}' AND pid <> pg_backend_pid();"`,
+      { stdio: 'inherit' }
+    );
+
     console.log(`Dropping and recreating ${dbName}...`);
     execSync(
       `docker exec ${container} psql -U ${dbUser} -d postgres -c "DROP DATABASE IF EXISTS ${dbName};"`,
@@ -577,12 +587,15 @@ function restoreTenantFromBackup(objectName) {
       { stdio: 'inherit' }
     );
 
-    // 3. Pipe the decompressed backup into the fresh database
     console.log(`Restoring ${objectName} into ${dbName}...`);
     execSync(
       `gunzip -c "${localBackupPath}" | docker exec -i ${container} psql -U ${dbUser} -d ${dbName}`,
       { shell: '/bin/bash', stdio: 'inherit' }
     );
+
+    // Bring pgbouncer/postgrest back up now that the database is restored
+    console.log(`Restarting pgbouncer/postgrest for ${tenantId}...`);
+    execSync('docker compose start pgbouncer postgrest', { cwd: tenantDir, stdio: 'inherit' });
   } finally {
     fs.unlinkSync(localBackupPath);
   }
