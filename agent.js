@@ -2,6 +2,7 @@ import express from 'express';
 import { findNewVolumeDevice, createTenantDatabase, destroyTenantDatabase, expandToBlockStorage, revertToLoopbackVolume, expandExistingBlockVolume, backupTenantDatabase, restoreTenantFromBackup, DATA_DIR } from './provisioner.js';
 import path from 'path';
 import { execSync } from 'child_process';
+import fs from 'fs';
 
 const app = express();
 app.use(express.json());
