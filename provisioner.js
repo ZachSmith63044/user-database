@@ -29,19 +29,23 @@ function renderTemplate(templatePath, vars) {
  * dataDir is about to become a separate mount point).
  */
 function createTenantDataVolume(dataDir, storageMb) {
+  // If something is already mounted at this path (a dedicated block
+  // volume, attached and mounted BEFORE tenant creation was triggered),
+  // skip loopback creation entirely and just use what's already there.
+  try {
+    execSync(`findmnt -n "${dataDir}"`, { stdio: 'ignore' });
+    console.log(`${dataDir} is already mounted (dedicated block storage) - skipping loopback creation`);
+    execSync(`sudo chown -R 999:999 "${dataDir}"`);
+    return;
+  } catch (err) {
+    // findmnt failed = nothing mounted yet = proceed with loopback (normal path)
+  }
+
   const imagePath = `${dataDir}.img`;
-
   fs.mkdirSync(dataDir, { recursive: true });
-
-  // Create a fixed-size, sparse-then-filled file and format it as ext4.
   execSync(`sudo fallocate -l ${storageMb}M "${imagePath}"`);
   execSync(`sudo mkfs.ext4 -q "${imagePath}"`);
-
-  // Mount it at the tenant's actual data path via a loop device.
   execSync(`sudo mount -o loop "${imagePath}" "${dataDir}"`);
-
-  // The postgres container runs as a specific internal UID - make sure
-  // the freshly mounted (root-owned by default) filesystem is writable.
   execSync(`sudo chown -R 999:999 "${dataDir}"`);
 }
 
@@ -176,8 +180,8 @@ function generateDbPassword() {
   return crypto.randomBytes(24).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 32);
 }
 
-async function createTenantDatabase(tier) {
-  const tenantId = crypto.randomUUID().replace(/-/g, '').slice(0, 10);
+async function createTenantDatabase(tier, presetTenantId = null) {
+  const tenantId = presetTenantId || crypto.randomUUID().replace(/-/g, '').slice(0, 10);
 
   const used = getUsedPorts();
   const hostPort = getNextFreePort(3001, used);

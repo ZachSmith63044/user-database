@@ -22,11 +22,11 @@ app.delete('/tenants/:tenantId', async (req, res) => {
 
 app.post('/tenants', async (req, res) => {
   try {
-    const { tier } = req.body;
+    const { tier, tenantId } = req.body;
     if (!tier) {
       return res.status(400).json({ error: 'Missing "tier" in request body' });
     }
-    const result = await createTenantDatabase(tier);
+    const result = await createTenantDatabase(tier, tenantId || null);
     res.json(result);
   } catch (err) {
     console.error('Failed to create tenant:', err);
@@ -162,6 +162,37 @@ app.post('/tenants/restore', async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('Failed to restore tenant:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+app.post('/prepare-dedicated-storage', (req, res) => {
+  const { tenantId, sizeGb } = req.body;
+
+  if (!tenantId || !sizeGb) {
+    return res.status(400).json({ error: 'Missing tenantId or sizeGb' });
+  }
+
+  try {
+    const device = findNewVolumeDevice(sizeGb);
+    if (!device) {
+      throw new Error(`Could not find a new block volume matching ${sizeGb}GB`);
+    }
+
+    const dataDir = path.join(DATA_DIR, tenantId, 'postgres');
+    fs.mkdirSync(dataDir, { recursive: true });
+
+    execSync(`sudo mkfs.ext4 -F "${device}"`);
+    execSync(`sudo mount "${device}" "${dataDir}"`);
+    execSync(`sudo chown -R 999:999 "${dataDir}"`);
+
+    const uuid = execSync(`sudo blkid -s UUID -o value "${device}"`, { encoding: 'utf8' }).trim();
+    execSync(`echo "UUID=${uuid} ${dataDir} ext4 defaults,nofail,_netdev 0 2" | sudo tee -a /etc/fstab`);
+
+    res.json({ tenantId, device, prepared: true });
+  } catch (err) {
+    console.error('Failed to prepare dedicated storage:', err);
     res.status(500).json({ error: err.message });
   }
 });
