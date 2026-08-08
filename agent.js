@@ -169,15 +169,16 @@ app.post('/tenants/restore', async (req, res) => {
 
 app.post('/prepare-dedicated-storage', (req, res) => {
   const { tenantId, sizeGb } = req.body;
-
-  if (!tenantId || !sizeGb) {
-    return res.status(400).json({ error: 'Missing tenantId or sizeGb' });
-  }
-
   try {
-    const device = findNewVolumeDevice(sizeGb);
+    let device = null;
+    for (let i = 0; i < 20; i++) {
+      device = findNewVolumeDevice(sizeGb);
+      if (device) break;
+      console.log(`Waiting for new block device to appear... (${i + 1}/20)`);
+      execSync('sleep 2');
+    }
     if (!device) {
-      throw new Error(`Could not find a new block volume matching ${sizeGb}GB`);
+      throw new Error(`Could not find a new block volume matching ${sizeGb}GB after waiting`);
     }
 
     const dataDir = path.join(DATA_DIR, tenantId, 'postgres');
