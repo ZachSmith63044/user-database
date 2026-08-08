@@ -608,4 +608,4 @@ function restoreTenantFromBackup(objectName, dbUser = 'baseuser') {
   return { tenantId, objectName, restored: true };
 }
 
-export { createTenantDatabase, destroyTenantDatabase, expandToBlockStorage, revertToLoopbackVolume, expandExistingBlockVolume, backupTenantDatabase, restoreTenantFromBackup, DATA_DIR };
+export { createTenantDatabase, destroyTenantDatabase, expandToBlockStorage, revertToLoopbackVolume, expandExistingBlockVolume, backupTenantDatabase, restoreTenantFromBackup, findNewVolumeDevice, DATA_DIR };
